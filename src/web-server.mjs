@@ -8,21 +8,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const INDEX = join(__dirname, '..', 'public', 'index.html');
 
 /**
- * 启动 web 服务：登录校验 + SSE 输出流 + 发送接口。
- * 鉴权用 token（query ?token= 或 x-token 头），不依赖 cookie，规避浏览器 SSE+cookie 的坑。
+ * 启动 web 服务：登录校验 + 事件轮询 + 发送接口。
+ * 输出改用短轮询而非 SSE：Cloudflare 免费隧道会缓冲 text/event-stream 永不放行，
+ * 而轮询是会正常结束的普通请求，任何 CDN/反代都不缓冲，穿透稳定。
+ * 鉴权用 token（query ?token= 或 x-token 头），不依赖 cookie。
  * @param {{port:number, token:string, onSend:(text:string)=>void}} opts
  * @returns {{push:(ev:object)=>void}}
  */
 export function startWebServer({ port, token, onSend }) {
-    const recent = [];   // 最近事件环形缓冲（新连接回放）
-    let client = null;   // 单连接：只保留最新一个 SSE 客户端
+    const recent = [];   // 最近事件缓冲（带递增 id，供轮询增量拉取）
+    let seq = 0;         // 事件序号，客户端用它做游标
 
     function push(ev) {
-        recent.push(ev);
+        seq += 1;
+        recent.push({ id: seq, ...ev });
         if (recent.length > 200) recent.shift();
-        if (client) {
-            try { client.write(`data: ${JSON.stringify(ev)}\n\n`); } catch { /* 已断 */ }
-        }
     }
 
     const readBody = (req) => new Promise(resolve => {
@@ -56,20 +56,12 @@ export function startWebServer({ port, token, onSend }) {
         // 以下接口需 token（query / x-token 头）
         if (!isAuthed(req, token)) { res.writeHead(401); res.end('unauthorized'); return; }
 
-        // SSE 输出流：新连接顶替旧的（EventSource 会自动重连，避免被锁卡死）
-        if (req.method === 'GET' && url === '/stream') {
-            res.writeHead(200, {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'X-Accel-Buffering': 'no', // 提示反代别缓冲 SSE
-            });
-            if (client && client !== res) { try { client.end(); } catch { /* noop */ } }
-            client = res;
-            res.write(`:${' '.repeat(2048)}\n\n`); // 初始填充：冲破 Cloudflare/nginx 等代理的缓冲阈值，强制开始流式
-            for (const ev of recent) res.write(`data: ${JSON.stringify(ev)}\n\n`); // 回放历史
-            const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* noop */ } }, 15000);
-            req.on('close', () => { clearInterval(ping); if (client === res) client = null; });
+        // 事件轮询：返回 id 大于 since 的增量事件 + 当前游标，客户端定时拉取
+        if (req.method === 'GET' && url === '/events') {
+            const since = parseInt(new URL(req.url, 'http://x').searchParams.get('since') || '0', 10);
+            const events = recent.filter(e => e.id > since);
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+            res.end(JSON.stringify({ events, last: seq }));
             return;
         }
 

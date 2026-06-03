@@ -93,10 +93,24 @@
             return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
         }
 
-        /** 打开 SSE 输出流（token 走 query，EventSource 不能带自定义头） */
+        /** 启动事件轮询（每秒拉一次增量；普通 JSON 请求，穿透任何代理都不被缓冲） */
         function connect() {
-            const es = new EventSource('/stream?token=' + encodeURIComponent(TOKEN));
-            es.onmessage = (e) => { try { addMsg(JSON.parse(e.data)); } catch {} };
+            let cursor = 0;     // 已拉取到的最大事件 id
+            let busy = false;   // 防止上一拉未回就重叠发起
+            const poll = async () => {
+                if (busy) return;
+                busy = true;
+                try {
+                    const r = await fetch('/events?since=' + cursor + '&token=' + encodeURIComponent(TOKEN));
+                    if (r.ok) {
+                        const { events, last } = await r.json();
+                        for (const ev of events) addMsg(ev);
+                        cursor = last;
+                    }
+                } catch { /* 网络抖动，下次再拉 */ } finally { busy = false; }
+            };
+            poll();
+            setInterval(poll, 1000);
         }
 
         /** 发送指令到会话（token 走 x-token 头；不本地回显，靠 transcript 流统一呈现） */
