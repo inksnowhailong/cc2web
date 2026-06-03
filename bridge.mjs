@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from 'fs';
 import { networkInterfaces } from 'os';
-import { loadConfig, regenerateToken } from './src/config.mjs';
+import { loadConfig, addSession } from './src/config.mjs';
 import { findLatestSession, sessionFile, tailSession } from './src/transcript.mjs';
 import { startWebServer } from './src/web-server.mjs';
 import { startTunnel } from './src/tunnel.mjs';
@@ -21,11 +21,10 @@ function lanIPs() {
 
 /** 解析极简命令行参数：--resume <id> / --port <n> / --no-tunnel */
 function parseArgs(argv) {
-    const a = { resume: null, port: null, noTunnel: false, newToken: false };
+    const a = { resume: null, port: null, noTunnel: false };
     for (let i = 2; i < argv.length; i++) {
         const v = argv[i];
         if (v === '--no-tunnel') a.noTunnel = true;
-        else if (v === '--new-token') a.newToken = true;
         else if (v === '--resume') a.resume = argv[++i];
         else if (v === '--port') a.port = parseInt(argv[++i], 10);
     }
@@ -34,9 +33,7 @@ function parseArgs(argv) {
 
 async function main() {
     const args = parseArgs(process.argv);
-    // --new-token：重新生成访问 token（旧 token 立即失效，手机需用新 token 重新登录）
-    const cfg = args.newToken ? regenerateToken() : loadConfig();
-    if (args.newToken) console.log('已重新生成访问 token，旧 token 失效，手机端请用下方新 token 重新登录。');
+    const cfg = loadConfig();
     const port = args.port || cfg.port;
 
     // 选定要续接的会话：显式 --resume 优先，否则自动取当前目录最近会话
@@ -63,7 +60,8 @@ async function main() {
     let ptyHost = null;
     const web = startWebServer({
         port,
-        token: cfg.token,
+        sessions: cfg.sessions,                                            // 已配对设备的 session 哈希
+        onPair: (hash) => addSession(hash),                                // 新设备配对成功 → 落盘哈希
         onSend: (text) => { if (ptyHost) ptyHost.submit(text); },          // 对话视图：发整条指令
         onTermInput: (d) => { if (ptyHost) ptyHost.write(d); },            // 终端视图：原始按键
         onTermResize: (c, r) => { if (ptyHost) ptyHost.resize(c, r); },    // 终端视图：尺寸同步
@@ -81,8 +79,17 @@ async function main() {
     console.log(`本地:   http://localhost:${port}`);
     for (const ip of lanIPs()) console.log(`局域网: http://${ip}:${port}  (手机同 WiFi 用这个)`);
     console.log(`公网:   ${publicUrl || '(cloudflared 未就绪，仅本地/局域网可连；装好后重启即获公网地址)'}`);
-    console.log(`Token:  ${cfg.token}`);
-    console.log('手机打开上面地址、输入 Token 登录。3 秒后进入会话（电脑端为原生界面）...\n');
+    const pair = web.pairStatus();
+    if (pair.bootstrapping) {
+        console.log(`配对码: ${pair.code}   (8 位数字，90 秒内有效、用一次即焚，每 90 秒自动换新)`);
+        console.log(`        当前活码持续写入：${pair.file}`);
+        console.log('        码被 claude 界面盖住后，另开一个终端读该文件即可拿到当前码。');
+        console.log('手机打开上面地址、输入配对码完成首次配对；配对成功后该设备长期免配对，入口随即关闭。');
+    } else {
+        console.log('设备:   已有配对设备，手机用上次的会话直接打开地址即可，无需再配对。');
+        console.log('        换手机 / 清了浏览器需重新配对：删除 ~/.c2web/config.json 后重启本程序。');
+    }
+    console.log('3 秒后进入会话（电脑端为原生界面）...\n');
     await new Promise(r => setTimeout(r, 3000));
 
     // 启动 pty：续接会话 + 接管本地终端；原始输出转发给手机终端镜像

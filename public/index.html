@@ -28,8 +28,8 @@
         #login { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 0 32px; }
         .logo { width: 56px; height: 56px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 26px; background: #d97757; color: #fff; box-shadow: 0 4px 14px rgba(217,119,87,.35); }
         .title { font-size: 20px; font-weight: 600; }
-        #token { width: 100%; max-width: 320px; padding: 12px 16px; border-radius: 12px; border: 1px solid #e0dccf; background: #fff; font-size: 16px; outline: none; }
-        #token:focus { border-color: #d97757; }
+        #code { width: 100%; max-width: 320px; padding: 12px 16px; border-radius: 12px; border: 1px solid #e0dccf; background: #fff; font-size: 16px; outline: none; letter-spacing: 4px; text-align: center; }
+        #code:focus { border-color: #d97757; }
         #loginBtn { width: 100%; max-width: 320px; padding: 12px 16px; border-radius: 12px; background: #d97757; color: #fff; font-weight: 600; font-size: 16px; box-shadow: 0 4px 14px rgba(217,119,87,.3); }
         #loginBtn:active { opacity: .9; }
         #loginErr { font-size: 14px; color: #ef4444; height: 20px; }
@@ -108,9 +108,9 @@
     <div data-alt="login-view" id="login">
         <div data-alt="login-logo" class="logo">✳</div>
         <div data-alt="login-title" class="title">Claude Phone Bridge</div>
-        <input data-alt="token-input" id="token" type="password" placeholder="输入访问 Token" />
-        <button data-alt="login-button" id="loginBtn">登录</button>
-        <div data-alt="login-error" id="loginErr"></div>
+        <input data-alt="paircode-input" id="code" type="text" inputmode="numeric" autocomplete="off" placeholder="输入 8 位配对码" />
+        <button data-alt="pair-button" id="pairBtn">配对</button>
+        <div data-alt="pair-error" id="pairErr"></div>
     </div>
 
     <!-- 聊天视图 -->
@@ -150,27 +150,32 @@
     <script>
         const $ = (id) => document.getElementById(id);
 
-        let TOKEN = '';        // 登录后保存，后续请求显式携带（不依赖 cookie）
+        let SESSION = '';      // 配对后拿到的设备凭证，只存本浏览器，后续显式携带（不依赖 cookie）
         let ws = null;         // 唯一 WebSocket，承载对话事件 + 终端镜像
         let maxId = 0;         // 已渲染的最大事件 id，断线重连回放时据此去重
 
-        /** 登录：校验 token，成功则保存并进入聊天 */
-        async function login() {
-            const token = $('token').value.trim();
-            const r = await fetch('/login', {
+        /** 进入聊天视图并建立 WS（配对成功 / 重访已存凭证时复用） */
+        function enterChat() {
+            $('login').classList.add('hidden');
+            $('chat').classList.remove('hidden');
+            connect();
+        }
+
+        /** 配对：校验 8 位短码，成功则保存服务端签发的 session 凭证并进入聊天 */
+        async function pair() {
+            const code = $('code').value.trim();
+            const r = await fetch('/pair', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token }),
+                body: JSON.stringify({ code }),
             });
             if (r.ok) {
-                TOKEN = token;
-                localStorage.setItem('c2web_token', token);
-                $('login').classList.add('hidden');
-                $('chat').classList.remove('hidden');
-                connect();
+                const { session } = await r.json();
+                SESSION = session;
+                localStorage.setItem('c2web_session', session);
+                enterChat();
             } else {
-                localStorage.removeItem('c2web_token');
-                $('loginErr').textContent = 'Token 不对';
+                $('pairErr').textContent = '配对码无效或已过期';
             }
         }
 
@@ -201,7 +206,8 @@
         /** 建立 WS 连接：对话事件即时推送 + 终端流，断线自动重连 */
         function connect() {
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+            ws = new WebSocket(`${proto}://${location.host}/ws?session=${encodeURIComponent(SESSION)}`);
+            let opened = false; // 是否曾握手成功，用于区分「凭证失效」与「普通掉线」
             ws.onmessage = (e) => {
                 let m; try { m = JSON.parse(e.data); } catch { return; }
                 if (m.t === 'ev') {                       // 对话事件（去重后渲染）
@@ -212,9 +218,19 @@
                     if (term) { term.reset(); term.write(m.d); }
                 }
             };
-            // 断线重连：重连后若正看着终端，onWsOpen 会重新 attach
-            ws.onclose = () => setTimeout(connect, 1500);
-            ws.onopen = onWsOpen;
+            ws.onopen = () => { opened = true; onWsOpen(); };
+            ws.onclose = () => {
+                if (!opened) {
+                    // 从未握手成功 → 凭证多半已失效（换设备/服务端重置），清掉并回配对界面
+                    localStorage.removeItem('c2web_session');
+                    SESSION = '';
+                    $('chat').classList.add('hidden');
+                    $('login').classList.remove('hidden');
+                    $('pairErr').textContent = '设备未配对或凭证已失效，请重新配对';
+                    return;
+                }
+                setTimeout(connect, 1500); // 普通掉线：重连后若正看终端，onWsOpen 会重新 attach
+            };
         }
 
         /** 连接就绪：若当前在终端页则订阅终端流并同步尺寸 */
@@ -302,8 +318,8 @@
             }
         }
 
-        $('loginBtn').onclick = login;
-        $('token').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+        $('pairBtn').onclick = pair;
+        $('code').addEventListener('keydown', e => { if (e.key === 'Enter') pair(); });
         $('sendBtn').onclick = send;
         $('text').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
         $('tabChat').onclick = () => switchView(false);
@@ -313,10 +329,10 @@
         });
         $('termRefresh').onclick = refreshTerm; // 覆盖上面循环里给它设的空 onclick
 
-        // 重访自动登录：localStorage 里有 token 就直接登
+        // 重访自动连：localStorage 里有 session 凭证就跳过配对直连（失效会在 onclose 退回配对界面）
         window.addEventListener('load', () => {
-            const saved = localStorage.getItem('c2web_token');
-            if (saved) { $('token').value = saved; login(); }
+            const saved = localStorage.getItem('c2web_session');
+            if (saved) { SESSION = saved; enterChat(); }
         });
     </script>
 </body>

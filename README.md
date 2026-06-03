@@ -23,7 +23,7 @@ Remote-control your local Claude Code session from your phone or browser.
 - 📵 **零 CDN**：marked / xterm 等资源全部本机服务，**国内移动网络 / 受限网络照样能用**，页面只发同源请求。
 - 📱 **移动端优化**：`100dvh` + 安全区适配，输入栏不被浏览器工具栏 / 小白条遮挡。
 - 🌐 **免费内网穿透**：自动拉起 cloudflared quick tunnel（免账号），同时打印局域网地址供同 WiFi 直连。
-- 🔐 **单人 token 门禁**：192bit 随机 token，`--new-token` 一键换新。
+- 🔐 **配对码门禁**：启动只露一个 8 位短码（90 秒有效、用一次即焚）；手机配对一次拿到只存浏览器的 session 凭证，之后长期免配对，横幅被截屏也没用。
 
 ## 📦 安装
 
@@ -54,9 +54,12 @@ npx @inksnow/c2web
    本地:   http://localhost:8787
    局域网: http://192.168.x.x:8787   (手机同 WiFi 用这个)
    公网:   https://xxxx.trycloudflare.com
-   Token:  <你的访问 token>
+   配对码: 04281769   (8 位数字，90 秒内有效、用一次即焚，每 90 秒自动换新)
+           当前活码持续写入：~/.c2web/paircode
    ```
-4. 手机打开地址、输入 Token，即可看到并接着这个会话干。(´･ᴗ･ ` )
+4. 手机打开地址、输入**配对码**完成首次配对，即可看到并接着这个会话干。(´･ᴗ･ ` )
+   - 配对成功后该设备**长期免配对**，下次直接打开地址即连；配对入口随即关闭。
+   - 90 秒没配上、码被 claude 界面盖住了？另开一个终端 `cat ~/.c2web/paircode` 读当前活码即可，无需重启。
 
 ## ⌨️ 参数
 
@@ -65,7 +68,6 @@ npx @inksnow/c2web
 | `--resume <id>` | 指定要续接的会话 id（默认取当前目录最近会话） |
 | `--port <n>` | web 端口（默认 8787） |
 | `--no-tunnel` | 不起 cloudflared，仅本地 / 局域网 |
-| `--new-token` | 重新生成访问 token（旧的立即失效），新 token 打印在启动横幅 |
 
 ## 🖥️ 两个视图
 
@@ -95,15 +97,15 @@ npx @inksnow/c2web
 - **对话视图**：用 [@constellos/claude-code-kit](https://www.npmjs.com/package/@constellos/claude-code-kit) 解析 transcript，把 assistant 文本 + 工具动作推给手机。
 - **终端视图**：直接镜像 node-pty 的原始输出，手机端 xterm 还原成与电脑一致的 TUI，按键回传 pty。
 - **传输**：单条 WebSocket 同时承载对话事件与终端流；对话带 id，断线重连自动去重。
-- **鉴权**：首次运行生成随机 token（存 `~/.c2web/config.json`），手机登录一次记住；token 走 URL/header，不依赖 cookie。
+- **鉴权**：两段式「配对码 → session 凭证」。启动若无已配对设备则开放配对：露一个 8 位短码（90s 有效、用一次即焚、每 90s 轮换并写入 `~/.c2web/paircode`）。手机 `POST /pair` 校验短码后拿到一次性签发的 session（明文只发这一次、只存浏览器）；服务端 `~/.c2web/config.json` 仅存其 SHA-256 哈希。之后 `/ws` 握手校验 session，走 URL，不依赖 cookie。**一旦有设备配上，配对入口立即关闭。**
 - **穿透**：自动拉起 cloudflared quick tunnel（免账号）；未装则仅本地 / 局域网可连。
 
 ## 🔐 安全
 
-- 单人 token 门禁：48 位十六进制（192bit）随机 token，没它一律拒绝。
+- 配对码门禁：8 位数字短码只在「尚无已配对设备」时开放，90 秒有效、用一次即焚、每 90 秒轮换；**横幅或截屏里的码 90 秒后即作废**。
+- 设备凭证：配对签发的 session 凭证只存手机浏览器；磁盘只存它的哈希，配置文件泄露也反推不出可用凭证。
 - 公网经 cloudflared 自带 HTTPS；纯局域网为明文 http，请只在可信网络用。
-- token 存 `~/.c2web/config.json`，泄露了 `c2web --new-token` 一键换新。
-- 截图 / 分享前留意别把启动横幅里的 Token 带出去。(´･_･`)
+- 换手机 / 清了浏览器要重新配对：删除 `~/.c2web/config.json` 后重启即重新开放配对。
 
 ## ⚠️ 注意
 
