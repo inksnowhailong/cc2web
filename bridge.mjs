@@ -1,10 +1,23 @@
 #!/usr/bin/env node
 import { existsSync } from 'fs';
+import { networkInterfaces } from 'os';
 import { loadConfig } from './src/config.mjs';
 import { findLatestSession, sessionFile, tailSession } from './src/transcript.mjs';
 import { startWebServer } from './src/web-server.mjs';
 import { startTunnel } from './src/tunnel.mjs';
 import { startPty } from './src/pty-host.mjs';
+
+/** 取本机所有非内网回环的 IPv4（局域网地址，供手机同 WiFi 访问） */
+function lanIPs() {
+    const out = [];
+    const ifaces = networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+        for (const ni of ifaces[name] || []) {
+            if (ni.family === 'IPv4' && !ni.internal) out.push(ni.address);
+        }
+    }
+    return out;
+}
 
 /** 解析极简命令行参数：--resume <id> / --port <n> / --no-tunnel */
 function parseArgs(argv) {
@@ -61,7 +74,8 @@ async function main() {
     console.log('\n==== Claude Phone Bridge ====');
     console.log(`会话:   ${sessionId}`);
     console.log(`本地:   http://localhost:${port}`);
-    console.log(`公网:   ${publicUrl || '(cloudflared 未就绪，仅本地可连；装好后重启即获公网地址)'}`);
+    for (const ip of lanIPs()) console.log(`局域网: http://${ip}:${port}  (手机同 WiFi 用这个)`);
+    console.log(`公网:   ${publicUrl || '(cloudflared 未就绪，仅本地/局域网可连；装好后重启即获公网地址)'}`);
     console.log(`Token:  ${cfg.token}`);
     console.log('手机打开上面地址、输入 Token 登录。3 秒后进入会话（电脑端为原生界面）...\n');
     await new Promise(r => setTimeout(r, 3000));

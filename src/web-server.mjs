@@ -66,6 +66,7 @@ export function startWebServer({ port, token, onSend }) {
             });
             if (client && client !== res) { try { client.end(); } catch { /* noop */ } }
             client = res;
+            res.write(`:${' '.repeat(2048)}\n\n`); // 初始填充：冲破 Cloudflare/nginx 等代理的缓冲阈值，强制开始流式
             for (const ev of recent) res.write(`data: ${JSON.stringify(ev)}\n\n`); // 回放历史
             const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* noop */ } }, 15000);
             req.on('close', () => { clearInterval(ping); if (client === res) client = null; });
