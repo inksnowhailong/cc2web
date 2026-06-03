@@ -34,7 +34,10 @@ export function startWebServer({ port, token, onSend }) {
 
         // 首页
         if (req.method === 'GET' && url === '/') {
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.writeHead(200, {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-store', // 始终拿最新页面，避免浏览器缓存旧版
+            });
             res.end(readFileSync(INDEX, 'utf8'));
             return;
         }
