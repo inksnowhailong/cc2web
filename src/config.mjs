@@ -25,3 +25,11 @@ export function loadConfig() {
     writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
     return cfg;
 }
+
+/** 重新生成 token（保留端口等其它配置），覆盖写回文件，返回新配置 */
+export function regenerateToken() {
+    const cfg = loadConfig(); // 复用现有配置（拿到端口、确保目录就绪）
+    cfg.token = genToken();
+    writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
+    return cfg;
+}

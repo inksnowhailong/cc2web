@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from 'fs';
 import { networkInterfaces } from 'os';
-import { loadConfig } from './src/config.mjs';
+import { loadConfig, regenerateToken } from './src/config.mjs';
 import { findLatestSession, sessionFile, tailSession } from './src/transcript.mjs';
 import { startWebServer } from './src/web-server.mjs';
 import { startTunnel } from './src/tunnel.mjs';
@@ -21,10 +21,11 @@ function lanIPs() {
 
 /** 解析极简命令行参数：--resume <id> / --port <n> / --no-tunnel */
 function parseArgs(argv) {
-    const a = { resume: null, port: null, noTunnel: false };
+    const a = { resume: null, port: null, noTunnel: false, newToken: false };
     for (let i = 2; i < argv.length; i++) {
         const v = argv[i];
         if (v === '--no-tunnel') a.noTunnel = true;
+        else if (v === '--new-token') a.newToken = true;
         else if (v === '--resume') a.resume = argv[++i];
         else if (v === '--port') a.port = parseInt(argv[++i], 10);
     }
@@ -33,7 +34,9 @@ function parseArgs(argv) {
 
 async function main() {
     const args = parseArgs(process.argv);
-    const cfg = loadConfig();
+    // --new-token：重新生成访问 token（旧 token 立即失效，手机需用新 token 重新登录）
+    const cfg = args.newToken ? regenerateToken() : loadConfig();
+    if (args.newToken) console.log('已重新生成访问 token，旧 token 失效，手机端请用下方新 token 重新登录。');
     const port = args.port || cfg.port;
 
     // 选定要续接的会话：显式 --resume 优先，否则自动取当前目录最近会话
