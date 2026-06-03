@@ -1,5 +1,5 @@
 {
-    "name": "c2web",
+    "name": "@inksnow/c2web",
     "version": "0.1.0",
     "description": "Remote-control your local Claude Code session from your phone or browser — node-pty session resume + single-page web + token auth + free tunnel. 用手机/浏览器遥控本机 Claude Code 会话。",
     "type": "module",

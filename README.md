@@ -28,11 +28,11 @@ Remote-control your local Claude Code session from your phone or browser.
 ## 📦 安装
 
 ```bash
-# 全局命令（推荐）
-npm install -g c2web
+# 全局命令（推荐）；装好后命令名就是 c2web
+npm install -g @inksnow/c2web
 
 # 或免安装直接跑
-npx c2web
+npx @inksnow/c2web
 ```
 
 > **Windows / macOS 开箱即用**：依赖 `node-pty` 自带预编译二进制，无需编译工具链。  
