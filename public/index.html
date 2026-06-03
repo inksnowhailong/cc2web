@@ -7,40 +7,80 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-        .md p { margin: 0 0 .4em; }
-        .md p:last-child { margin-bottom: 0; }
-        .md pre { background: #f3f4f6; padding: .5em; border-radius: .4em; overflow-x: auto; margin: .3em 0; }
-        .md code { background: #f3f4f6; padding: .1em .3em; border-radius: .3em; font-size: .9em; }
-        .md pre code { background: none; padding: 0; }
-        .md ul, .md ol { margin: .2em 0 .4em 1.2em; }
-        .md h1, .md h2, .md h3 { font-weight: 600; margin: .3em 0; }
-        .md a { color: #2563eb; text-decoration: underline; }
-        .md blockquote { border-left: 3px solid #d1d5db; padding-left: .6em; color: #6b7280; margin: .3em 0; }
+        :root { color-scheme: light; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+
+        /* —— markdown 正文：行距宽松、层次清晰 —— */
+        .md { font-size: 15px; line-height: 1.7; color: #2c2c2c; word-break: break-word; }
+        .md > *:first-child { margin-top: 0; }
+        .md > *:last-child { margin-bottom: 0; }
+        .md p { margin: 0 0 .7em; }
+        .md strong { font-weight: 600; color: #1a1a1a; }
+        .md em { font-style: italic; }
+
+        /* 行内代码：低饱和底色，和正文区分但不刺眼 */
+        .md code { background: #f0eee6; color: #b03a2e; padding: .12em .4em; border-radius: .35em; font-size: .88em; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
+
+        /* 代码块：深色卡片，移动端看代码更聚焦 */
+        .md pre { background: #1e1e2e; color: #e4e4e7; padding: .85em 1em; border-radius: .6em; overflow-x: auto; margin: .7em 0; font-size: 13px; line-height: 1.6; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+        .md pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+
+        /* 列表：缩进适中，项间留白 */
+        .md ul, .md ol { margin: .5em 0 .7em; padding-left: 1.4em; }
+        .md li { margin: .25em 0; }
+        .md ul { list-style: disc; }
+        .md ol { list-style: decimal; }
+
+        /* 标题：克制的字号梯度 */
+        .md h1, .md h2, .md h3 { font-weight: 600; line-height: 1.3; margin: .9em 0 .45em; color: #1a1a1a; }
+        .md h1 { font-size: 1.3em; }
+        .md h2 { font-size: 1.18em; }
+        .md h3 { font-size: 1.06em; }
+
+        .md a { color: #2563eb; text-decoration: none; border-bottom: 1px solid rgba(37,99,235,.3); }
+        .md blockquote { border-left: 3px solid #d6c9a8; background: #faf8f2; padding: .5em .8em; color: #5c5346; margin: .7em 0; border-radius: 0 .4em .4em 0; }
+        .md hr { border: none; border-top: 1px solid #e5e1d8; margin: 1em 0; }
+
+        /* 表格：轻边框，斑马纹 */
+        .md table { border-collapse: collapse; margin: .7em 0; font-size: 14px; width: 100%; }
+        .md th, .md td { border: 1px solid #e5e1d8; padding: .4em .6em; text-align: left; }
+        .md th { background: #f5f2ea; font-weight: 600; }
+
+        /* 滚动条收窄，移动端更干净 */
+        #msgs::-webkit-scrollbar { width: 5px; }
+        #msgs::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 3px; }
     </style>
 </head>
-<body class="bg-gray-100 h-screen overflow-hidden">
+<body class="h-screen overflow-hidden" style="background:#f5f2ea;">
 
     <!-- 登录视图 -->
-    <div data-alt="login-view" id="login" class="h-full flex flex-col items-center justify-center gap-4 px-8">
-        <div data-alt="login-title" class="text-xl font-semibold text-gray-700">Claude Phone Bridge</div>
+    <div data-alt="login-view" id="login" class="h-full flex flex-col items-center justify-center gap-5 px-8">
+        <div data-alt="login-logo" class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl" style="background:#d97757;color:#fff;box-shadow:0 4px 14px rgba(217,119,87,.35);">✳</div>
+        <div data-alt="login-title" class="text-xl font-semibold" style="color:#2c2c2c;">Claude Phone Bridge</div>
         <input data-alt="token-input" id="token" type="password" placeholder="输入访问 Token"
-            class="w-full max-w-xs px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+            class="w-full max-w-xs px-4 py-3 rounded-xl border focus:outline-none focus:ring-2"
+            style="border-color:#e0dccf;background:#fff;" />
         <button data-alt="login-button" id="loginBtn"
-            class="w-full max-w-xs px-4 py-3 rounded-lg bg-blue-600 text-white font-medium active:bg-blue-700">登录</button>
+            class="w-full max-w-xs px-4 py-3 rounded-xl text-white font-medium active:opacity-90 transition"
+            style="background:#d97757;box-shadow:0 4px 14px rgba(217,119,87,.3);">登录</button>
         <div data-alt="login-error" id="loginErr" class="text-sm text-red-500 h-5"></div>
     </div>
 
     <!-- 聊天视图 -->
     <div data-alt="chat-view" id="chat" class="hidden h-full flex flex-col">
-        <div data-alt="chat-header" class="px-4 py-3 bg-white border-b text-sm text-gray-500 shrink-0">
-            已连接 · 同一会话双端同步
+        <div data-alt="chat-header" class="px-4 py-3 flex items-center gap-2 shrink-0"
+            style="background:rgba(245,242,234,.85);backdrop-filter:blur(8px);border-bottom:1px solid #e8e3d6;">
+            <span class="w-2 h-2 rounded-full" style="background:#3fb950;box-shadow:0 0 6px #3fb950;"></span>
+            <span class="text-sm font-medium" style="color:#5c5346;">已连接 · 同一会话双端同步</span>
         </div>
-        <div data-alt="message-list" id="msgs" class="flex-1 overflow-y-auto px-3 py-4 space-y-2"></div>
-        <div data-alt="input-bar" class="p-3 bg-white border-t flex gap-2 shrink-0">
+        <div data-alt="message-list" id="msgs" class="flex-1 overflow-y-auto px-3 py-4 space-y-3"></div>
+        <div data-alt="input-bar" class="p-3 flex gap-2 shrink-0" style="background:#fff;border-top:1px solid #e8e3d6;">
             <input data-alt="message-input" id="text" type="text" placeholder="发消息给 Claude…"
-                class="flex-1 px-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                class="flex-1 px-4 py-2.5 rounded-full border focus:outline-none focus:ring-2"
+                style="border-color:#e0dccf;" />
             <button data-alt="send-button" id="sendBtn"
-                class="px-5 py-2 rounded-full bg-blue-600 text-white font-medium active:bg-blue-700">发送</button>
+                class="px-5 py-2.5 rounded-full text-white font-medium active:opacity-90 transition"
+                style="background:#d97757;">发送</button>
         </div>
     </div>
 
@@ -75,14 +115,14 @@
             const wrap = document.createElement('div');
             if (ev.kind === 'user') {
                 wrap.className = 'flex justify-end';
-                wrap.innerHTML = `<div data-alt="msg-user" class="max-w-[80%] px-3 py-2 rounded-2xl bg-blue-600 text-white whitespace-pre-wrap break-words">${esc(ev.text)}</div>`;
+                wrap.innerHTML = `<div data-alt="msg-user" class="max-w-[82%] px-4 py-2.5 text-white whitespace-pre-wrap break-words text-[15px] leading-relaxed" style="background:#d97757;border-radius:18px 18px 4px 18px;box-shadow:0 1px 3px rgba(217,119,87,.25);">${esc(ev.text)}</div>`;
             } else if (ev.kind === 'assistant') {
                 wrap.className = 'flex justify-start';
                 const html = window.marked ? marked.parse(ev.text) : esc(ev.text);
-                wrap.innerHTML = `<div data-alt="msg-assistant" class="md max-w-[85%] px-3 py-2 rounded-2xl bg-white text-gray-800 break-words shadow-sm">${html}</div>`;
+                wrap.innerHTML = `<div data-alt="msg-assistant" class="md max-w-[88%] px-4 py-3 break-words" style="background:#fff;border-radius:18px 18px 18px 4px;box-shadow:0 1px 3px rgba(0,0,0,.06);">${html}</div>`;
             } else { // tool：我在干啥
                 wrap.className = 'flex justify-start';
-                wrap.innerHTML = `<div data-alt="msg-tool" class="text-xs text-gray-400 px-2">🔧 ${esc(ev.text)}</div>`;
+                wrap.innerHTML = `<div data-alt="msg-tool" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full" style="background:#ece7da;color:#8a7f6b;">🔧 ${esc(ev.text)}</div>`;
             }
             list.appendChild(wrap);
             list.scrollTop = list.scrollHeight;
