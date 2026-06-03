@@ -6,6 +6,9 @@
     <title>Claude Phone Bridge</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit/lib/addon-fit.js"></script>
     <style>
         :root { color-scheme: light; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
@@ -49,6 +52,12 @@
         /* 滚动条收窄，移动端更干净 */
         #msgs::-webkit-scrollbar { width: 5px; }
         #msgs::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 3px; }
+
+        /* 终端快捷键药丸 */
+        .termkey { padding: .35em .7em; border-radius: .5em; font-size: 13px; white-space: nowrap; background: #313244; color: #cdd6f4; }
+        .termkey:active { background: #45475a; }
+        /* xterm 容器铺满 */
+        #term .xterm, #term .xterm-viewport { height: 100% !important; }
     </style>
 </head>
 <body class="h-screen overflow-hidden" style="background:#f5f2ea;">
@@ -68,19 +77,43 @@
 
     <!-- 聊天视图 -->
     <div data-alt="chat-view" id="chat" class="hidden h-full flex flex-col">
-        <div data-alt="chat-header" class="px-4 py-3 flex items-center gap-2 shrink-0"
+        <div data-alt="chat-header" class="px-4 py-2.5 flex items-center gap-3 shrink-0"
             style="background:rgba(245,242,234,.85);backdrop-filter:blur(8px);border-bottom:1px solid #e8e3d6;">
-            <span class="w-2 h-2 rounded-full" style="background:#3fb950;box-shadow:0 0 6px #3fb950;"></span>
-            <span class="text-sm font-medium" style="color:#5c5346;">已连接 · 同一会话双端同步</span>
+            <span class="w-2 h-2 rounded-full shrink-0" style="background:#3fb950;box-shadow:0 0 6px #3fb950;"></span>
+            <!-- 视图切换：对话(markdown) / 终端(xterm 镜像) -->
+            <div data-alt="view-tabs" class="flex gap-1 p-0.5 rounded-lg" style="background:#e8e3d6;">
+                <button data-alt="tab-chat" id="tabChat" class="px-3 py-1 text-sm rounded-md font-medium transition"
+                    style="background:#fff;color:#2c2c2c;">对话</button>
+                <button data-alt="tab-term" id="tabTerm" class="px-3 py-1 text-sm rounded-md font-medium transition"
+                    style="color:#8a7f6b;">终端</button>
+            </div>
         </div>
-        <div data-alt="message-list" id="msgs" class="flex-1 overflow-y-auto px-3 py-4 space-y-3"></div>
-        <div data-alt="input-bar" class="p-3 flex gap-2 shrink-0" style="background:#fff;border-top:1px solid #e8e3d6;">
-            <input data-alt="message-input" id="text" type="text" placeholder="发消息给 Claude…"
-                class="flex-1 px-4 py-2.5 rounded-full border focus:outline-none focus:ring-2"
-                style="border-color:#e0dccf;" />
-            <button data-alt="send-button" id="sendBtn"
-                class="px-5 py-2.5 rounded-full text-white font-medium active:opacity-90 transition"
-                style="background:#d97757;">发送</button>
+
+        <!-- 对话视图（markdown 阅读 + 发整条指令） -->
+        <div data-alt="chat-pane" id="paneChat" class="flex-1 flex flex-col min-h-0">
+            <div data-alt="message-list" id="msgs" class="flex-1 overflow-y-auto px-3 py-4 space-y-3"></div>
+            <div data-alt="input-bar" class="p-3 flex gap-2 shrink-0" style="background:#fff;border-top:1px solid #e8e3d6;">
+                <input data-alt="message-input" id="text" type="text" placeholder="发消息给 Claude…"
+                    class="flex-1 px-4 py-2.5 rounded-full border focus:outline-none focus:ring-2"
+                    style="border-color:#e0dccf;" />
+                <button data-alt="send-button" id="sendBtn"
+                    class="px-5 py-2.5 rounded-full text-white font-medium active:opacity-90 transition"
+                    style="background:#d97757;">发送</button>
+            </div>
+        </div>
+
+        <!-- 终端视图（xterm 镜像，所见即所得，可看选项/推进/中断） -->
+        <div data-alt="term-pane" id="paneTerm" class="hidden flex-1 flex-col min-h-0" style="background:#1e1e2e;">
+            <div data-alt="terminal" id="term" class="flex-1 min-h-0 px-1 py-1"></div>
+            <!-- 手机没有物理 Esc/方向键，给一排快捷键（data-key 映射到实际控制序列） -->
+            <div data-alt="term-keys" class="flex gap-1.5 p-2 overflow-x-auto shrink-0" style="background:#181825;border-top:1px solid #313244;">
+                <button class="termkey" data-key="esc">Esc 中断</button>
+                <button class="termkey" data-key="enter">Enter</button>
+                <button class="termkey" data-key="ctrlc">Ctrl+C</button>
+                <button class="termkey" data-key="up">↑</button>
+                <button class="termkey" data-key="down">↓</button>
+                <button class="termkey" data-key="tab">Tab</button>
+            </div>
         </div>
     </div>
 
@@ -133,42 +166,113 @@
             return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
         }
 
-        /** 启动事件轮询（每秒拉一次增量；普通 JSON 请求，穿透任何代理都不被缓冲） */
+        let ws = null;          // 唯一 WebSocket，承载对话事件 + 终端镜像
+        let maxId = 0;          // 已渲染的最大事件 id，断线重连回放时据此去重
+
+        /** 建立 WS 连接：对话事件即时推送 + 终端流，断线自动重连 */
         function connect() {
-            let cursor = 0;     // 已拉取到的最大事件 id
-            let busy = false;   // 防止上一拉未回就重叠发起
-            const poll = async () => {
-                if (busy) return;
-                busy = true;
-                try {
-                    const r = await fetch('/events?since=' + cursor + '&token=' + encodeURIComponent(TOKEN));
-                    if (r.ok) {
-                        const { events, last } = await r.json();
-                        for (const ev of events) addMsg(ev);
-                        cursor = last;
-                    }
-                } catch { /* 网络抖动，下次再拉 */ } finally { busy = false; }
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+            ws.onmessage = (e) => {
+                let m; try { m = JSON.parse(e.data); } catch { return; }
+                if (m.t === 'ev') {                       // 对话事件（去重后渲染）
+                    if (m.e.id > maxId) { maxId = m.e.id; addMsg(m.e); }
+                } else if (m.t === 'term') {              // 终端实时输出
+                    if (term) term.write(m.d);
+                } else if (m.t === 'term-replay') {       // attach 回放：先清屏再写，避免叠屏
+                    if (term) { term.reset(); term.write(m.d); }
+                }
             };
-            poll();
-            setInterval(poll, 1000);
+            // 断线重连：重连后若正看着终端，重新 attach（服务端会回放当前屏）
+            ws.onclose = () => setTimeout(() => { connect(); ws.onopen = onWsOpen; }, 1500);
+            ws.onopen = onWsOpen;
         }
 
-        /** 发送指令到会话（token 走 x-token 头；不本地回显，靠 transcript 流统一呈现） */
-        async function send() {
+        /** 连接就绪：若当前在终端页则订阅终端流并同步尺寸 */
+        function onWsOpen() {
+            if (term && !$('paneTerm').classList.contains('hidden')) { wsSend({ t: 'attach' }); sendResize(); }
+        }
+
+        /** 发送指令到会话（不本地回显，靠 transcript 流统一呈现） */
+        function send() {
             const t = $('text').value.trim();
             if (!t) return;
             $('text').value = '';
-            await fetch('/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-token': TOKEN },
-                body: JSON.stringify({ text: t }),
+            wsSend({ t: 'send', text: t });
+        }
+
+        // ============ 终端镜像（xterm，复用上面的 ws） ============
+        let term = null;        // xterm 实例（懒初始化）
+        let fitAddon = null;    // 自适应容器尺寸
+        let termReady = false;  // 是否已初始化过
+
+        /** 常用控制键 → 实际发送给 pty 的字节序列 */
+        const KEY_SEQ = {
+            esc: '\x1b',        // Esc：Claude 用它中断当前生成
+            enter: '\r',
+            ctrlc: '\x03',      // Ctrl+C
+            up: '\x1b[A',
+            down: '\x1b[B',
+            tab: '\t',
+        };
+
+        /** 懒初始化终端：建 xterm 实例并接到共享 ws（终端流靠 attach 订阅）；只跑一次 */
+        function initTerm() {
+            if (termReady) return;
+            termReady = true;
+            term = new Terminal({
+                cursorBlink: true,
+                fontSize: 13,
+                fontFamily: "'SFMono-Regular', Consolas, monospace",
+                theme: { background: '#1e1e2e', foreground: '#cdd6f4' },
             });
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open($('term'));
+            fitAddon.fit();
+            term.onData((d) => wsSend({ t: 'i', d }));                         // 键盘 → pty
+
+            // 容器尺寸变化（旋屏/切到此页）→ 重新 fit 并把新尺寸同步给 pty
+            window.addEventListener('resize', () => { if (!$('paneTerm').classList.contains('hidden')) { fitAddon.fit(); sendResize(); } });
+        }
+
+        /** 安全发送：ws 未就绪则忽略 */
+        function wsSend(obj) { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch {} }
+
+        /** 把当前终端行列数同步给 pty，保证 TUI 不错位 */
+        function sendResize() { if (term) wsSend({ t: 'r', c: term.cols, r: term.rows }); }
+
+        /** 切换视图：对话 / 终端 */
+        function switchView(toTerm) {
+            $('paneChat').classList.toggle('hidden', toTerm);
+            $('paneTerm').classList.toggle('hidden', !toTerm);
+            $('paneTerm').classList.toggle('flex', toTerm);
+            // tab 高亮
+            $('tabChat').style.background = toTerm ? 'transparent' : '#fff';
+            $('tabChat').style.color = toTerm ? '#8a7f6b' : '#2c2c2c';
+            $('tabTerm').style.background = toTerm ? '#fff' : 'transparent';
+            $('tabTerm').style.color = toTerm ? '#2c2c2c' : '#8a7f6b';
+            if (toTerm) {
+                initTerm();
+                wsSend({ t: 'attach' }); // 订阅终端流，服务端回放当前屏
+                // 等布局完成再 fit，否则拿到的尺寸是 0
+                setTimeout(() => { if (fitAddon) { fitAddon.fit(); sendResize(); term.focus(); } }, 50);
+            } else {
+                wsSend({ t: 'detach' }); // 退订，终端啰嗦，不看时省流量
+            }
         }
 
         $('loginBtn').onclick = login;
         $('token').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
         $('sendBtn').onclick = send;
         $('text').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+        $('tabChat').onclick = () => switchView(false);
+        $('tabTerm').onclick = () => switchView(true);
+
+        // 快捷键按钮：发送对应控制序列到 pty
+        document.querySelectorAll('.termkey').forEach(btn => {
+            btn.onclick = () => { const seq = KEY_SEQ[btn.dataset.key]; if (seq != null) wsSend({ t: 'i', d: seq }); };
+        });
 
         // 重访自动登录：localStorage 里有 token 就直接登
         window.addEventListener('load', () => {

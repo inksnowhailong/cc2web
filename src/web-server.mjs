@@ -2,27 +2,40 @@ import http from 'http';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { isAuthed } from './auth.mjs';
+import { WebSocketServer } from 'ws';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INDEX = join(__dirname, '..', 'public', 'index.html');
 
 /**
- * 启动 web 服务：登录校验 + 事件轮询 + 发送接口。
- * 输出改用短轮询而非 SSE：Cloudflare 免费隧道会缓冲 text/event-stream 永不放行，
- * 而轮询是会正常结束的普通请求，任何 CDN/反代都不缓冲，穿透稳定。
- * 鉴权用 token（query ?token= 或 x-token 头），不依赖 cookie。
- * @param {{port:number, token:string, onSend:(text:string)=>void}} opts
- * @returns {{push:(ev:object)=>void}}
+ * 启动 web 服务：登录校验（HTTP）+ 单条 WebSocket 通道（对话事件 + 终端镜像 + 发送/按键）。
+ * 全用 WS 而非 SSE/轮询：WS 走 cloudflared 原生支持、不被缓冲，且对话消息即时无延迟。
+ * 鉴权用 token：/login 校验，/ws 握手时校验 ?token=。
+ * @param {{port:number, token:string, onSend:(text:string)=>void, onTermInput?:(d:string)=>void, onTermResize?:(c:number,r:number)=>void}} opts
+ * @returns {{push:(ev:object)=>void, pushTerm:(data:string)=>void}}
  */
-export function startWebServer({ port, token, onSend }) {
-    const recent = [];   // 最近事件缓冲（带递增 id，供轮询增量拉取）
-    let seq = 0;         // 事件序号，客户端用它做游标
+export function startWebServer({ port, token, onSend, onTermInput, onTermResize }) {
+    const recent = [];          // 对话事件缓冲（带递增 id，新连接回放 + 重连去重）
+    let seq = 0;                // 事件序号
+    let termBuf = '';           // 终端原始输出缓冲（attach 时回放当前屏）
+    const clients = new Set();  // 所有 ws，每个带 .wantTerm 标记是否正在看终端
 
+    /** 推一条对话事件：存入缓冲并即时广播给所有客户端 */
     function push(ev) {
         seq += 1;
-        recent.push({ id: seq, ...ev });
+        const withId = { id: seq, ...ev };
+        recent.push(withId);
         if (recent.length > 200) recent.shift();
+        const msg = JSON.stringify({ t: 'ev', e: withId });
+        for (const ws of clients) { try { ws.send(msg); } catch { /* 已断 */ } }
+    }
+
+    /** 推一段 pty 原始输出：存入回放缓冲，仅广播给正在看终端的客户端 */
+    function pushTerm(data) {
+        termBuf += data;
+        if (termBuf.length > 64 * 1024) termBuf = termBuf.slice(-64 * 1024); // 只留最近 64KB
+        const msg = JSON.stringify({ t: 'term', d: data });
+        for (const ws of clients) { if (ws.wantTerm) { try { ws.send(msg); } catch { /* 已断 */ } } }
     }
 
     const readBody = (req) => new Promise(resolve => {
@@ -34,15 +47,12 @@ export function startWebServer({ port, token, onSend }) {
 
         // 首页
         if (req.method === 'GET' && url === '/') {
-            res.writeHead(200, {
-                'Content-Type': 'text/html; charset=utf-8',
-                'Cache-Control': 'no-store', // 始终拿最新页面，避免浏览器缓存旧版
-            });
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
             res.end(readFileSync(INDEX, 'utf8'));
             return;
         }
 
-        // 登录：仅校验 token，返回 ok/401（前端自行保存 token）
+        // 登录：仅校验 token，返回 ok/401（前端自行保存，后续走 WS）
         if (req.method === 'POST' && url === '/login') {
             const body = await readBody(req);
             let t = '';
@@ -53,30 +63,34 @@ export function startWebServer({ port, token, onSend }) {
             return;
         }
 
-        // 以下接口需 token（query / x-token 头）
-        if (!isAuthed(req, token)) { res.writeHead(401); res.end('unauthorized'); return; }
-
-        // 事件轮询：返回 id 大于 since 的增量事件 + 当前游标，客户端定时拉取
-        if (req.method === 'GET' && url === '/events') {
-            const since = parseInt(new URL(req.url, 'http://x').searchParams.get('since') || '0', 10);
-            const events = recent.filter(e => e.id > since);
-            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-            res.end(JSON.stringify({ events, last: seq }));
-            return;
-        }
-
-        // 发指令 → 注入会话
-        if (req.method === 'POST' && url === '/send') {
-            const body = await readBody(req);
-            let text = '';
-            try { text = JSON.parse(body).text || ''; } catch { /* 坏请求 */ }
-            if (text) onSend(text);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end('{"ok":true}');
-            return;
-        }
-
         res.writeHead(404); res.end('not found');
+    });
+
+    // 统一 WebSocket 通道：/ws?token=xxx
+    const wss = new WebSocketServer({ noServer: true });
+    server.on('upgrade', (req, socket, head) => {
+        const u = new URL(req.url, 'http://x');
+        // 路径与 token 校验不过直接断开（WS 握手阶段无法走普通 401）
+        if (u.pathname !== '/ws' || u.searchParams.get('token') !== token) { socket.destroy(); return; }
+        wss.handleUpgrade(req, socket, head, ws => {
+            ws.wantTerm = false;
+            clients.add(ws);
+            // 回放对话历史（客户端按 id 去重，重连不会重复渲染）
+            for (const ev of recent) { try { ws.send(JSON.stringify({ t: 'ev', e: ev })); } catch { /* noop */ } }
+            ws.on('message', raw => {
+                let m; try { m = JSON.parse(raw.toString()); } catch { return; }
+                if (m.t === 'send') onSend?.(m.text);
+                else if (m.t === 'i') onTermInput?.(m.d);              // 终端按键透传
+                else if (m.t === 'r') onTermResize?.(m.c, m.r);        // 终端尺寸同步
+                else if (m.t === 'attach') {                           // 进终端页：订阅 + 回放当前屏
+                    ws.wantTerm = true;
+                    try { ws.send(JSON.stringify({ t: 'term-replay', d: termBuf })); } catch { /* noop */ }
+                } else if (m.t === 'detach') {                         // 出终端页：退订，省流量
+                    ws.wantTerm = false;
+                }
+            });
+            ws.on('close', () => clients.delete(ws));
+        });
     });
 
     // 端口被占用等错误：给人话提示而非抛栈崩溃
@@ -90,5 +104,5 @@ export function startWebServer({ port, token, onSend }) {
         process.exit(1);
     });
     server.listen(port);
-    return { push };
+    return { push, pushTerm };
 }

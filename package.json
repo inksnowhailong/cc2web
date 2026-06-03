@@ -31,7 +31,7 @@
         "phone",
         "tunnel",
         "cloudflared",
-        "sse"
+        "websocket"
     ],
     "author": "moxue",
     "license": "MIT",
@@ -45,6 +45,7 @@
     },
     "dependencies": {
         "@constellos/claude-code-kit": "^0.4.0",
-        "node-pty": "^1.1.0"
+        "node-pty": "^1.1.0",
+        "ws": "^8.21.0"
     }
 }

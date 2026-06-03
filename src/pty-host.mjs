@@ -6,14 +6,14 @@ const pty = require('node-pty');
 
 /**
  * 在伪终端里 resume 指定会话，并把 pty 与本地终端双向打通：
- * - pty 输出 → 本地终端（电脑端看到的就是原生 Claude TUI）
+ * - pty 输出 → 本地终端（电脑端原生 TUI）+ onData 回调（转发给手机终端镜像）
  * - 本地键盘 → pty（你照常在电脑上打字）
- * - submit(text) → 供手机端把指令注入同一个会话
+ * - submit(text) → 手机「对话」视图发整条指令；write(d) → 手机「终端」视图发原始按键
  *
  * @param {string} sessionId 要续接的会话 id
- * @param {(code:number)=>void} onExit claude 退出回调
+ * @param {{onExit:(code:number)=>void, onData?:(data:string)=>void}} hooks
  */
-export function startPty(sessionId, onExit) {
+export function startPty(sessionId, { onExit, onData }) {
     const isWin = process.platform === 'win32';
     const file = isWin ? 'claude.cmd' : 'claude';
     const child = pty.spawn(file, ['--resume', sessionId], {
@@ -24,8 +24,8 @@ export function startPty(sessionId, onExit) {
         env: process.env,
     });
 
-    // pty 输出镜像到本地终端
-    child.onData(d => process.stdout.write(d));
+    // pty 输出：镜像到本地终端，同时回调给手机终端镜像
+    child.onData(d => { process.stdout.write(d); onData?.(d); });
 
     // 本地终端原始输入透传给 pty
     if (process.stdin.isTTY) process.stdin.setRawMode(true);
@@ -43,8 +43,12 @@ export function startPty(sessionId, onExit) {
     });
 
     return {
-        /** 手机端注入一条指令：写入文本后回车提交 */
+        /** 手机「对话」视图：注入一条指令（文本 + 回车提交） */
         submit: (text) => { child.write(text); child.write('\r'); },
+        /** 手机「终端」视图：原始按键透传（含 Esc 中断、方向键选择、Ctrl+C 等） */
+        write: (data) => { try { child.write(data); } catch { /* 已退出 */ } },
+        /** 手机终端尺寸变化 → 同步 pty，保证 TUI 在手机上不错位 */
+        resize: (cols, rows) => { try { child.resize(cols || 80, rows || 30); } catch { /* 已退出 */ } },
         /** 杀掉 pty 子进程（退出时清理，避免 Windows 下孤儿残留） */
         kill: () => { try { child.kill(); } catch { /* 已退出 */ } },
     };

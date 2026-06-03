@@ -56,12 +56,14 @@ async function main() {
         file = latest.file;
     }
 
-    // pty 句柄延迟赋值；onSend 在手机发指令时才会用到，那时 ptyHost 已就绪
+    // pty 句柄延迟赋值；下列回调在手机交互时才触发，那时 ptyHost 已就绪
     let ptyHost = null;
     const web = startWebServer({
         port,
         token: cfg.token,
-        onSend: (text) => { if (ptyHost) ptyHost.submit(text); },
+        onSend: (text) => { if (ptyHost) ptyHost.submit(text); },          // 对话视图：发整条指令
+        onTermInput: (d) => { if (ptyHost) ptyHost.write(d); },            // 终端视图：原始按键
+        onTermResize: (c, r) => { if (ptyHost) ptyHost.resize(c, r); },    // 终端视图：尺寸同步
     });
 
     // tail transcript → 推送 web（电脑打字 / 手机发的 / 思绪主动说的，都会经此到手机）
@@ -80,10 +82,13 @@ async function main() {
     console.log('手机打开上面地址、输入 Token 登录。3 秒后进入会话（电脑端为原生界面）...\n');
     await new Promise(r => setTimeout(r, 3000));
 
-    // 启动 pty：续接会话 + 接管本地终端
-    ptyHost = startPty(sessionId, (code) => {
-        console.log(`\nclaude 已退出 (code=${code})，bridge 结束。`);
-        process.exit(code || 0);
+    // 启动 pty：续接会话 + 接管本地终端；原始输出转发给手机终端镜像
+    ptyHost = startPty(sessionId, {
+        onExit: (code) => {
+            console.log(`\nclaude 已退出 (code=${code})，bridge 结束。`);
+            process.exit(code || 0);
+        },
+        onData: (d) => web.pushTerm(d),
     });
 
     // 退出清理：杀掉 pty 子进程，避免 Windows 下孤儿残留占用端口
