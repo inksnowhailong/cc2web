@@ -1,0 +1,50 @@
+{
+    "name": "c2web",
+    "version": "0.1.0",
+    "description": "Remote-control your local Claude Code session from your phone or browser — node-pty session resume + single-page web + token auth + free tunnel. 用手机/浏览器遥控本机 Claude Code 会话。",
+    "type": "module",
+    "bin": {
+        "c2web": "bridge.mjs"
+    },
+    "files": [
+        "bridge.mjs",
+        "src/",
+        "public/",
+        "install.mjs",
+        "README.md",
+        "LICENSE"
+    ],
+    "scripts": {
+        "start": "node bridge.mjs",
+        "setup": "node install.mjs"
+    },
+    "engines": {
+        "node": ">=16"
+    },
+    "keywords": [
+        "claude",
+        "claude-code",
+        "remote-control",
+        "pty",
+        "node-pty",
+        "mobile",
+        "phone",
+        "tunnel",
+        "cloudflared",
+        "sse"
+    ],
+    "author": "moxue",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/inksnowhailong/cc2web.git"
+    },
+    "homepage": "https://github.com/inksnowhailong/cc2web#readme",
+    "bugs": {
+        "url": "https://github.com/inksnowhailong/cc2web/issues"
+    },
+    "dependencies": {
+        "@constellos/claude-code-kit": "^0.4.0",
+        "node-pty": "^1.1.0"
+    }
+}

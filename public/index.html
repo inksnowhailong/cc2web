@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Claude Phone Bridge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 h-screen overflow-hidden">
+
+    <!-- 登录视图 -->
+    <div data-alt="login-view" id="login" class="h-full flex flex-col items-center justify-center gap-4 px-8">
+        <div data-alt="login-title" class="text-xl font-semibold text-gray-700">Claude Phone Bridge</div>
+        <input data-alt="token-input" id="token" type="password" placeholder="输入访问 Token"
+            class="w-full max-w-xs px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        <button data-alt="login-button" id="loginBtn"
+            class="w-full max-w-xs px-4 py-3 rounded-lg bg-blue-600 text-white font-medium active:bg-blue-700">登录</button>
+        <div data-alt="login-error" id="loginErr" class="text-sm text-red-500 h-5"></div>
+    </div>
+
+    <!-- 聊天视图 -->
+    <div data-alt="chat-view" id="chat" class="hidden h-full flex flex-col">
+        <div data-alt="chat-header" class="px-4 py-3 bg-white border-b text-sm text-gray-500 shrink-0">
+            已连接 · 同一会话双端同步
+        </div>
+        <div data-alt="message-list" id="msgs" class="flex-1 overflow-y-auto px-3 py-4 space-y-2"></div>
+        <div data-alt="input-bar" class="p-3 bg-white border-t flex gap-2 shrink-0">
+            <input data-alt="message-input" id="text" type="text" placeholder="发消息给 Claude…"
+                class="flex-1 px-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+            <button data-alt="send-button" id="sendBtn"
+                class="px-5 py-2 rounded-full bg-blue-600 text-white font-medium active:bg-blue-700">发送</button>
+        </div>
+    </div>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+
+        let TOKEN = ''; // 登录后保存，后续请求显式携带（不依赖 cookie）
+
+        /** 登录：校验 token，成功则保存并进入聊天 */
+        async function login() {
+            const token = $('token').value.trim();
+            const r = await fetch('/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token }),
+            });
+            if (r.ok) {
+                TOKEN = token;
+                localStorage.setItem('c2web_token', token);
+                $('login').classList.add('hidden');
+                $('chat').classList.remove('hidden');
+                connect();
+            } else {
+                localStorage.removeItem('c2web_token');
+                $('loginErr').textContent = 'Token 不对';
+            }
+        }
+
+        /** 把一条事件渲染进消息列表（按来源区分样式） */
+        function addMsg(ev) {
+            const list = $('msgs');
+            const wrap = document.createElement('div');
+            if (ev.kind === 'user') {
+                wrap.className = 'flex justify-end';
+                wrap.innerHTML = `<div data-alt="msg-user" class="max-w-[80%] px-3 py-2 rounded-2xl bg-blue-600 text-white whitespace-pre-wrap break-words">${esc(ev.text)}</div>`;
+            } else if (ev.kind === 'assistant') {
+                wrap.className = 'flex justify-start';
+                wrap.innerHTML = `<div data-alt="msg-assistant" class="max-w-[80%] px-3 py-2 rounded-2xl bg-white text-gray-800 whitespace-pre-wrap break-words shadow-sm">${esc(ev.text)}</div>`;
+            } else { // tool：我在干啥
+                wrap.className = 'flex justify-start';
+                wrap.innerHTML = `<div data-alt="msg-tool" class="text-xs text-gray-400 px-2">🔧 ${esc(ev.text)}</div>`;
+            }
+            list.appendChild(wrap);
+            list.scrollTop = list.scrollHeight;
+        }
+
+        /** 转义，防止 transcript 内容破坏 DOM */
+        function esc(s) {
+            return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        }
+
+        /** 打开 SSE 输出流（token 走 query，EventSource 不能带自定义头） */
+        function connect() {
+            const es = new EventSource('/stream?token=' + encodeURIComponent(TOKEN));
+            es.onmessage = (e) => { try { addMsg(JSON.parse(e.data)); } catch {} };
+        }
+
+        /** 发送指令到会话（token 走 x-token 头；不本地回显，靠 transcript 流统一呈现） */
+        async function send() {
+            const t = $('text').value.trim();
+            if (!t) return;
+            $('text').value = '';
+            await fetch('/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-token': TOKEN },
+                body: JSON.stringify({ text: t }),
+            });
+        }
+
+        $('loginBtn').onclick = login;
+        $('token').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+        $('sendBtn').onclick = send;
+        $('text').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+        // 重访自动登录：localStorage 里有 token 就直接登
+        window.addEventListener('load', () => {
+            const saved = localStorage.getItem('c2web_token');
+            if (saved) { $('token').value = saved; login(); }
+        });
+    </script>
+</body>
+</html>
