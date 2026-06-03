@@ -1,6 +1,6 @@
 import http from 'http';
 import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 
@@ -60,6 +60,18 @@ export function startWebServer({ port, token, onSend, onTermInput, onTermResize 
             const ok = t === token;
             res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok }));
+            return;
+        }
+
+        // 本地 vendor 静态资源（marked/xterm 等）：零 CDN，移动端/受限网络也能加载
+        if (req.method === 'GET' && url.startsWith('/vendor/')) {
+            const name = basename(url); // basename 防目录穿越
+            try {
+                const buf = readFileSync(join(__dirname, '..', 'public', 'vendor', name));
+                const ct = name.endsWith('.css') ? 'text/css' : 'text/javascript';
+                res.writeHead(200, { 'Content-Type': `${ct}; charset=utf-8`, 'Cache-Control': 'max-age=86400' });
+                res.end(buf);
+            } catch { res.writeHead(404); res.end('not found'); }
             return;
         }
 
