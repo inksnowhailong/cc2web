@@ -71,6 +71,16 @@ async function main() {
         console.log(`\nclaude 已退出 (code=${code})，bridge 结束。`);
         process.exit(code || 0);
     });
+
+    // 退出清理：杀掉 pty 子进程，避免 Windows 下孤儿残留占用端口
+    const cleanup = () => { try { if (ptyHost) ptyHost.kill(); } catch { /* 已退出 */ } };
+    process.on('exit', cleanup);
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+        try { process.on(sig, () => { cleanup(); process.exit(0); }); } catch { /* 平台不支持该信号 */ }
+    }
+    // 终端被关闭时 stdin 管道会断，借此兜底清理（Windows 关窗口不发可靠信号）
+    process.stdin.on('end', () => { cleanup(); process.exit(0); });
+    process.stdin.on('close', () => { cleanup(); process.exit(0); });
 }
 
 main();

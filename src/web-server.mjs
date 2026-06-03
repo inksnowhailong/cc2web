@@ -86,6 +86,16 @@ export function startWebServer({ port, token, onSend }) {
         res.writeHead(404); res.end('not found');
     });
 
+    // 端口被占用等错误：给人话提示而非抛栈崩溃
+    server.on('error', (e) => {
+        if (e.code === 'EADDRINUSE') {
+            console.error(`\n端口 ${port} 已被占用——很可能上次的 c2web 没退干净（Windows 关窗口常残留孤儿进程）。`);
+            console.error(`解决：换端口  c2web --port ${port + 1}   或先杀掉占用该端口的进程再重试。`);
+        } else {
+            console.error('web 服务出错:', e.message);
+        }
+        process.exit(1);
+    });
     server.listen(port);
     return { push };
 }

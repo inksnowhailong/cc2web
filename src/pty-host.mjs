@@ -45,5 +45,7 @@ export function startPty(sessionId, onExit) {
     return {
         /** 手机端注入一条指令：写入文本后回车提交 */
         submit: (text) => { child.write(text); child.write('\r'); },
+        /** 杀掉 pty 子进程（退出时清理，避免 Windows 下孤儿残留） */
+        kill: () => { try { child.kill(); } catch { /* 已退出 */ } },
     };
 }
