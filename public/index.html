@@ -76,6 +76,8 @@
         }
         .termkey { padding: 6px 11px; border-radius: 8px; font-size: 13px; white-space: nowrap; background: #313244; color: #cdd6f4; }
         .termkey:active { background: #45475a; }
+        .termkey.refresh { background: #d97757; color: #fff; font-weight: 600; }
+        .termkey.refresh:active { background: #c2664a; }
 
         /* —— markdown 正文 —— */
         .md { font-size: 15px; line-height: 1.7; color: #2c2c2c; }
@@ -134,6 +136,7 @@
         <div data-alt="term-pane" id="paneTerm" class="hidden">
             <div data-alt="terminal" id="term"></div>
             <div data-alt="term-keys" class="term-keys">
+                <button class="termkey refresh" id="termRefresh">⟳ 刷新</button>
                 <button class="termkey" data-key="esc">Esc 中断</button>
                 <button class="termkey" data-key="enter">Enter</button>
                 <button class="termkey" data-key="ctrlc">Ctrl+C</button>
@@ -268,6 +271,22 @@
         /** 把当前终端行列数同步给 pty，保证 TUI 不错位 */
         function sendResize() { if (term) wsSend({ t: 'r', c: term.cols, r: term.rows }); }
 
+        /**
+         * 主动刷新终端：清屏 + 重订阅 + 抖动一次尺寸逼 TUI 全量重绘。
+         * 用于偶发的「刷新空白」——靠 resize 触发 Ink 重画当前界面，拿到一帧权威完整画面，
+         * 不再依赖可能被截断的原始字节缓冲。
+         */
+        function refreshTerm() {
+            if (!term || !fitAddon) return;
+            term.reset();
+            fitAddon.fit();
+            const cols = term.cols, rows = term.rows;
+            wsSend({ t: 'attach' });                                      // 重订阅 + 回放当前屏
+            wsSend({ t: 'r', c: cols, r: Math.max(2, rows - 1) });        // 改尺寸 → 触发 TUI 重绘
+            setTimeout(() => wsSend({ t: 'r', c: cols, r: rows }), 120);  // 恢复 → 得到完整当前画面
+            term.focus();
+        }
+
         /** 切换视图：对话 / 终端 */
         function switchView(toTerm) {
             $('paneChat').classList.toggle('hidden', toTerm);
@@ -292,6 +311,7 @@
         document.querySelectorAll('.termkey').forEach(btn => {
             btn.onclick = () => { const seq = KEY_SEQ[btn.dataset.key]; if (seq != null) wsSend({ t: 'i', d: seq }); };
         });
+        $('termRefresh').onclick = refreshTerm; // 覆盖上面循环里给它设的空 onclick
 
         // 重访自动登录：localStorage 里有 token 就直接登
         window.addEventListener('load', () => {
